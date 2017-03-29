@@ -1,4 +1,4 @@
-//
+﻿//
 // ObjectDescriptionCollection.cs
 //
 // Author:

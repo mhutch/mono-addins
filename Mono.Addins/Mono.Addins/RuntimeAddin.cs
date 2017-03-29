@@ -1,4 +1,4 @@
-//
+﻿//
 // RuntimeAddin.cs
 //
 // Author:
@@ -53,7 +53,7 @@ namespace Mono.Addins
 		Addin ainfo;
 		RuntimeAddin parentAddin;
 		
-		Assembly[] assemblies;
+		RuntimeAssembly[] assemblies;
 		RuntimeAddin[] depAddins;
 		ResourceManager[] resourceManagers;
 		AddinLocalizer localizer;
@@ -82,7 +82,7 @@ namespace Mono.Addins
 			get { return module; }
 		}
 		
-		internal Assembly[] Assemblies {
+		internal RuntimeAssembly[] Assemblies {
 			get {
 				EnsureAssembliesLoaded ();
 				return assemblies;
@@ -127,11 +127,11 @@ namespace Mono.Addins
 			ArrayList managersList = new ArrayList ();
 
 			// Search for embedded resource files
-			foreach (Assembly asm in assemblies)
+			foreach (RuntimeAssembly asm in assemblies)
 			{
-				foreach (string res in asm.GetManifestResourceNames ()) {
+				foreach (string res in asm.Assembly.GetManifestResourceNames ()) {
 					if (res.EndsWith (".resources"))
-						managersList.Add (new ResourceManager (res.Substring (0, res.Length - ".resources".Length), asm));
+						managersList.Add (new ResourceManager (res.Substring (0, res.Length - ".resources".Length), asm.Assembly));
 				}
 			}
 
@@ -355,14 +355,14 @@ namespace Mono.Addins
 		
 		IEnumerable<Assembly> GetAllAssemblies ()
 		{
-			foreach (Assembly asm in Assemblies)
-				yield return asm;
+			foreach (var asm in Assemblies)
+				yield return asm.Assembly;
 			
 			// Look in the parent addin assemblies
 			
 			if (parentAddin != null) {
-				foreach (Assembly asm in parentAddin.Assemblies)
-					yield return asm;
+				foreach (var asm in parentAddin.Assemblies)
+					yield return asm.Assembly;
 			}
 		}
 		
@@ -649,14 +649,14 @@ namespace Mono.Addins
 			return depAddins = (RuntimeAddin[]) plugList.ToArray (typeof(RuntimeAddin));
 		}
 		
-		void LoadModule (ModuleDescription module, ArrayList asmList)
+		void LoadModule (ModuleDescription module, List<RuntimeAssembly> asmList)
 		{
 			// Load the assemblies
-			foreach (string s in module.Assemblies) {
+			foreach (var masm in module.ModuleAssemblies) {
 				Assembly asm = null;
 
 				// don't load the assembly if it's already loaded
-				string asmPath = Path.Combine (baseDirectory, s);
+				string asmPath = Path.Combine (baseDirectory, masm.RelativePath);
 				foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies ()) {
 					// Sorry, you can't load addins from
 					// dynamic assemblies as get_Location
@@ -679,10 +679,18 @@ namespace Mono.Addins
 					asm = Assembly.LoadFrom (asmPath);
 				}
 
-				asmList.Add (asm);
+				var rasm = new RuntimeAssembly {
+					Assembly = asm
+				};
+
+				if (masm.RedirectVersion != null) {
+					df
+				}
+
+				asmList.Add (rasm);
 			}
 		}
-		
+
 		internal void UnloadExtensions ()
 		{
 			addinEngine.UnregisterAddinNodeSets (id);
@@ -711,14 +719,21 @@ namespace Mono.Addins
 			if (assemblies != null)
 				return;
 			
-			ArrayList asmList = new ArrayList ();
+			var asmList = new List<RuntimeAssembly> ();
 			
 			// Load the assemblies of the module
 			CheckAddinDependencies (module, true);
 			LoadModule (module, asmList);
 			
-			assemblies = (Assembly[]) asmList.ToArray (typeof(Assembly));
+			assemblies = asmList.ToArray ();
 			addinEngine.RegisterAssemblies (this);
 		}
+	}
+
+	class RuntimeAssembly
+	{
+		public Assembly Assembly { get; internal set; }
+		public Version RedirectUpperBound { get; internal set; }
+		public Version RedirectLowerBound { get; internal set; }
 	}
 }

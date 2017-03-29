@@ -1,4 +1,4 @@
-//
+﻿//
 // ModuleDescription.cs
 //
 // Author:
@@ -27,13 +27,11 @@
 //
 
 using System;
-using System.Collections;
-using System.IO;
 using System.Xml;
-using System.Xml.Serialization;
 using System.Collections.Specialized;
 using Mono.Addins.Serialization;
 using Mono.Addins.Database;
+using System.Collections.Generic;
 
 namespace Mono.Addins.Description
 {
@@ -46,7 +44,7 @@ namespace Mono.Addins.Description
 	/// </remarks>
 	public class ModuleDescription: ObjectDescription
 	{
-		StringCollection assemblies;
+		List<ModuleAssembly> assemblies;
 		StringCollection dataFiles;
 		StringCollection ignorePaths;
 		DependencyCollection dependencies;
@@ -129,19 +127,33 @@ namespace Mono.Addins.Description
 				return col;
 			}
 		}
-		
+
 		/// <summary>
 		/// Gets the list of external assemblies used by this module.
 		/// </summary>
-		public StringCollection Assemblies {
+		public List<ModuleAssembly> ModuleAssemblies {
 			get {
 				if (assemblies == null) {
 					if (Element != null)
 						InitCollections ();
 					else
-						assemblies = new StringCollection ();
+						assemblies = new List<ModuleAssembly> ();
 				}
 				return assemblies;
+			}
+		}
+
+		/// <summary>
+		/// Gets the list of external assemblies used by this module.
+		/// </summary>
+		[Obsolete("Use ModuleAssemblies")]
+		public StringCollection Assemblies {
+			get {
+				var sc = new StringCollection ();
+				foreach (var a in ModuleAssemblies) {
+					sc.Add (a.RelativePath);
+				}
+				return sc;
 			}
 		}
 		
@@ -260,9 +272,12 @@ namespace Mono.Addins.Description
 					runtime.RemoveChild (runtime.FirstChild);
 					
 				if (assemblies != null) {
-					foreach (string s in assemblies) {
+					foreach (ModuleAssembly s in assemblies) {
 						XmlElement asm = Element.OwnerDocument.CreateElement ("Import");
-						asm.SetAttribute ("assembly", s);
+						asm.SetAttribute ("assembly", s.RelativePath);
+						if (s.RedirectVersion != null) {
+							asm.SetAttribute ("redirectVersion", s.RedirectVersion);
+						}
 						runtime.AppendChild (asm);
 					}
 				}
@@ -341,14 +356,21 @@ namespace Mono.Addins.Description
 		void InitCollections ()
 		{
 			dataFiles = new StringCollection ();
-			assemblies = new StringCollection ();
+			assemblies = new List<ModuleAssembly> ();
 			
 			XmlNodeList elems = Element.SelectNodes ("Runtime/*");
 			foreach (XmlElement elem in elems) {
 				if (elem.LocalName == "Import") {
 					string asm = elem.GetAttribute ("assembly");
 					if (asm.Length > 0) {
-						assemblies.Add (asm);
+						var moduleAsm = new ModuleAssembly {
+							RelativePath = asm
+						};
+						var versionRedirect = elem.GetAttribute ("versionRedirect");
+						if (versionRedirect.Length > 0) {
+							moduleAsm.RedirectVersion = versionRedirect;
+						}
+						assemblies.Add (moduleAsm);
 					} else {
 						string file = elem.GetAttribute ("file");
 						if (file.Length > 0)
@@ -384,7 +406,7 @@ namespace Mono.Addins.Description
 		{
 			// We can assume that paths read from a binary files are always normalized
 
-			assemblies = (StringCollection) reader.ReadValue ("Assemblies", new StringCollection ());
+			assemblies = (List<ModuleAssembly>) reader.ReadValue ("Assemblies", new List<ModuleAssembly> ());
 			dataFiles = (StringCollection) reader.ReadValue ("DataFiles", new StringCollection ());
 			dependencies = (DependencyCollection) reader.ReadValue ("Dependencies", new DependencyCollection (this));
 			extensions = (ExtensionCollection) reader.ReadValue ("Extensions", new ExtensionCollection (this));

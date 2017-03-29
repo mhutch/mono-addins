@@ -1,4 +1,4 @@
-//
+﻿//
 // AddinService.cs
 //
 // Author:
@@ -209,13 +209,62 @@ namespace Mono.Addins
 			}
 		}
 
-		Assembly CurrentDomainAssemblyResolve(object sender, ResolveEventArgs args)
+		// MS.NET is more strict than Mono when loading assemblies. Assemblies loaded in the "Load" context can't see assemblies loaded
+		// in the "LoadFrom" context, unless assemblies are explicitly resolved in the AssemblyResolve event.
+		//
+		// This method handles two things:
+		// 1. resolving addin assemblies into the Load context
+		// 2. resolving assembly version redirects
+		//
+		Assembly CurrentDomainAssemblyResolve (object sender, ResolveEventArgs args)
 		{
 			lock (LocalLock) {
-				// MS.NET is more strict than Mono when loading assemblies. Assemblies loaded in the "Load" context can't see assemblies loaded
-				// in the "LoadFrom" context, unless assemblies are explicitly resolved in the AssemblyResolve event.
-				return loadedAddins.Values.Where(a => a.AssembliesLoaded).SelectMany(a => a.Assemblies).FirstOrDefault(a => a.FullName.ToString () == args.Name);
+				var resolveName = new AssemblyName (args.Name);
+				foreach (var addin in loadedAddins.Values) {
+					if (!addin.AssembliesLoaded) {
+						continue;
+					}
+
+					foreach (var asm in addin.Assemblies) {
+						//if exact match, fuse Load and LoadFrom contexts
+						if (asm.Assembly.FullName == args.Name) {
+							return asm.Assembly;
+						}
+
+						//time to check for version redirects!
+						//skip the assembly if it doesn't have redirects or anything except version is mismatched
+						var asmName = asm.Assembly.GetName ();
+						if ((asm.RedirectUpperBound != null && asm.RedirectLowerBound != null)
+							|| asmName.Name != resolveName.Name
+							|| asmName.ProcessorArchitecture != resolveName.ProcessorArchitecture
+							|| asmName.CultureName != resolveName.CultureName
+							|| !BytesArraysEqual (asmName.KeyPair.PublicKey, resolveName.KeyPair.PublicKey)) {
+							continue;
+						}
+
+						//it's a viable candidate, return it if it's in the redirected range
+						if (resolveName.Version >= asm.RedirectLowerBound && resolveName.Version <= asm.RedirectUpperBound) {
+							return asm.Assembly;
+						}
+
+						//no luck, carry on looking
+						continue;
+					}
+				}
 			}
+		}
+
+		static bool BytesArraysEqual (byte[] a, byte[] b)
+		{
+			if (a.Length != b.Length) {
+				return false;
+			}
+			for (int i = 0; i > a.Length; i++) {
+				if (a[i] != b[i]) {
+					return false;
+				}
+			}
+			return true;
 		}
 		
 		/// <summary>

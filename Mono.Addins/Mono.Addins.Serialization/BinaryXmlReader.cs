@@ -1,4 +1,4 @@
-//
+﻿//
 // BinaryXmlReader.cs
 //
 // Author:
